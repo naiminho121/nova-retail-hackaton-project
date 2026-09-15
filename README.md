@@ -1,256 +1,254 @@
-# Nova Retail — Modern Data Stack
+# Nova Retail
+
+End-to-end data analytics project for a global technology and electronics retailer.
+
+The project transforms raw sales, customer reviews and financial target data into an analytics-ready data model for business intelligence reporting.
 
 ## Project Overview
 
-Nova Retail is a global technology and electronics retailer with fragmented data across Sales, Marketing Reviews and Finance.
-
-The objective of this project is to build an end-to-end modern data platform that transforms heterogeneous raw data into a trusted, business-ready analytical model and an executive BI dashboard.
-
-The solution follows a Medallion-style architecture:
-
-**Local Files → Dataiku → Snowflake Bronze → dbt Silver → dbt Gold → Power BI**
-
----
-
-## Architecture
+Nova Retail integrates data from multiple sources and follows a modern analytics architecture:
 
 ```text
-                         LOCAL DATA SOURCES
-                                │
-                ┌───────────────┼───────────────┐
-                │               │               │
-             Sales CSV      Reviews JSON    Finance Excel
-                │               │               │
-                └───────────────┼───────────────┘
-                                ▼
-                             DATAIKU
-                         Ingestion & Profiling
-                                │
-                                ▼
-                       SNOWFLAKE — BRONZE
-                                │
-                                ▼
-                         DBT — SILVER
-                    Cleaning & Standardization
-                                │
-                                ▼
-                          DBT — GOLD
-                       Dimensional Model
-                                │
-                 ┌──────────────┼──────────────┐
-                 │              │              │
-            DIMENSIONS       FACTS          FACTS
-                 │              │              │
-                 └──────────────┼──────────────┘
-                                ▼
-                            POWER BI
-                       Executive Dashboard
+Local Files
+    ↓
+Dataiku
+    ↓
+Snowflake Bronze
+    ↓
+dbt Silver
+    ↓
+dbt Gold
+    ↓
+Power BI
 ```
 
----
+The main objective is to build a reliable and scalable data pipeline that supports sales performance analysis, financial reporting and target tracking.
 
-## Technology Stack
+## Data Sources
 
-| Layer | Technology | Purpose |
-|---|---|---|
-| Ingestion & profiling | Dataiku | Local data ingestion, exploration and initial data quality analysis |
-| Data warehouse | Snowflake | Centralized cloud storage and compute |
-| Transformation | dbt | Data cleaning, transformation, modelling, testing and documentation |
-| BI | Power BI | Executive dashboard and business analysis |
-| Version control | GitHub | Source control and project collaboration |
+The project uses three main business sources:
 
----
+- `raw_sales_transactions.csv`
+- `web_reviews.json`
+- `finance_targets_2023.xlsx`
 
-## Source Data
+An additional ECB historical exchange-rate dataset is used to standardize USD and GBP sales into EUR.
 
-### 1. Sales Transactions
+### Sales Transactions
 
-`raw_sales_transactions.csv`
+Contains order-level sales information including:
 
-The sales dataset contains transaction-level information including:
-
-- Order
+- Order ID
 - Transaction date
 - Customer information
-- Product
-- Category
-- Price
+- Product information
 - Quantity
+- Price
+- Currency
 - Discount
 
-The source is highly denormalized and contains several data quality issues such as mixed date formats, embedded customer information, mixed currency formats and inconsistent discount representations.
+### Web Reviews
 
-### 2. Web Reviews
+Contains customer review information including:
 
-`web_reviews.json`
-
-The reviews dataset contains:
-
-- Review
-- Product
-- Customer
+- Review ID
+- Product reference
+- Customer information
 - Location
 - Timestamp
 - Rating
 - Review text
 
-The original JSON structure contains nested customer and location attributes and timestamps using different precisions.
+### Finance Targets
 
-### 3. Finance Targets
-
-`finance_targets_2023.xlsx`
-
-The finance dataset contains monthly revenue targets by:
+Contains monthly financial targets by:
 
 - Region
-- Product Category
+- Product category
 - Month
 
-The original data is stored in a wide format and is transformed into a monthly analytical structure.
+The original dataset is provided in a wide monthly format and is transformed into a long analytical structure.
 
----
+### ECB Exchange Rates
 
-## Data Architecture
+Historical ECB reference exchange rates are used for USD and GBP transactions.
+
+The exchange-rate data allows sales originally recorded in different currencies to be standardized to EUR for global financial analysis.
+
+## Architecture
 
 ### Bronze
 
-The Bronze layer contains the raw ingested source data.
+The Bronze layer contains raw or minimally prepared source data loaded into Snowflake.
 
-Tables:
+Main source tables:
 
 - `NOVARETAIL_RAW_SALES_TRANSACTIONS_COPY`
 - `NOVARETAIL_WEB_REVIEWS_COPY`
 - `NOVARETAIL_FINANCE_TARGETS_2023_COPY`
-
-The objective is to preserve source information before applying analytical transformations.
+- `NOVARETAIL_EUROFXREF_HIST_PREPARED_COPY`
 
 ### Silver
 
-The Silver layer contains cleaned and standardized datasets.
-
-Models:
-
-- `STG_SALES_TRANSACTIONS`
-- `STG_WEB_REVIEWS`
-- `STG_FINANCE_TARGETS`
+The Silver layer contains cleaned and standardized source-level models created with dbt.
 
 Main transformations include:
 
 - Date standardization
-- Customer information parsing
-- Price and currency cleaning
+- Customer information splitting
+- Price and currency normalization
 - Discount standardization
 - Return identification
 - Review timestamp normalization
 - Rating validation
 - Finance target unpivoting
+- FX data reshaping
+
+Main staging models:
+
+- `stg_sales_transactions`
+- `stg_web_reviews`
+- `stg_finance_targets`
+- `stg_fx_ecb`
 
 ### Gold
 
-The Gold layer contains the business-ready dimensional model used by Power BI.
+The Gold layer contains analytics-ready dimensional and fact models.
 
 #### Dimensions
 
-- `DIM_DATE`
-- `DIM_CUSTOMER`
-- `DIM_PRODUCT`
+- `dim_date`
+- `dim_customer`
+- `dim_product`
 
 #### Facts
 
-- `FCT_SALES`
-- `FCT_TARGETS`
+- `fct_sales`
+- `fct_targets`
 
-The Gold model is designed around clearly defined grains and relationships.
-
----
+The model follows a simple star-schema approach designed for Power BI reporting.
 
 ## Gold Model
 
+```text
+                    DIM_DATE
+                       │
+              ┌────────┴────────┐
+              │                 │
+         FCT_SALES          FCT_TARGETS
+          /     \
+         /       \
+DIM_CUSTOMER   DIM_PRODUCT
+```
+
 ### FCT_SALES
 
-**Grain:** one row per sales order.
+The sales fact table has one row per order.
 
-Key measures:
+It contains:
 
+- Transaction date
+- Customer and product keys
+- Quantity
+- Price
+- Original currency
+- Discount
+- Return indicator
 - Revenue
 - Profit
-- Quantity
-- Discount
+- FX rate information
+- Revenue in EUR
+- Profit in EUR
 
-Profit is calculated using the 30% margin assumption specified in the project brief.
+For USD and GBP transactions, the latest available ECB reference rate on or before the transaction date is used.
+
+EUR transactions use an exchange rate of `1`.
+
+The EUR-converted measures are:
+
+- `revenue_eur`
+- `profit_eur`
+
+These measures are used for cross-currency financial analysis.
 
 ### FCT_TARGETS
 
-**Grain:** one row per Region + Category + Month.
+The target fact table contains monthly financial targets.
 
-The table contains:
+Its grain is:
 
-- Region
-- Category
-- Month
-- Target Amount
+**Region + Category + Month**
 
-A dedicated dbt test validates the uniqueness of this grain.
+The source does not explicitly specify the currency of the target amounts, so the target currency is treated as a project assumption rather than a confirmed source attribute.
 
-For the complete visual ERD, see:
+## Currency Standardization
 
-`GOLD_ERD.md`
+The project uses ECB reference exchange rates to standardize USD and GBP sales into EUR.
 
----
+ECB rates represent units of the original currency per EUR.
+
+Therefore:
+
+```text
+Revenue EUR = Revenue in Original Currency / ECB Rate
+```
+
+For example:
+
+```text
+USD Revenue / USD per EUR = EUR Revenue
+```
+
+When an applicable FX rate is unavailable, the EUR-converted value remains `NULL`.
+
+No exchange rate is estimated or imputed.
 
 ## Data Quality
 
-Data quality issues are explicitly identified and documented rather than silently removing problematic records.
+Data quality is addressed throughout the pipeline using both transformation rules and dbt tests.
 
 Examples include:
 
-- Mixed date formats
-- Missing dates
-- Embedded customer attributes
-- Mixed currencies
-- Negative quantities
-- Inconsistent discount formats
-- Mixed timestamp precision
-- Missing or invalid review ratings
-- Wide-format finance targets
-- Missing finance region values
+- Standardizing multiple date formats
+- Handling missing and invalid dates
+- Splitting customer information
+- Normalizing discounts
+- Identifying returned orders
+- Validating review ratings
+- Converting timestamps
+- Reshaping financial targets
+- Validating FX data grain
+- Validating EUR currency conversion
 
-Detailed treatment and assumptions are documented in:
+The project uses dbt generic tests such as:
 
-`DATA_QUALITY.md`
+- `not_null`
+- `unique`
+- `relationships`
+- `accepted_values`
 
----
+It also includes singular tests for project-specific business rules.
 
-## dbt Testing
+All current dbt models and tests pass successfully.
 
-The Gold layer is validated using dbt tests covering:
+## Key Data Quality Findings
 
-- Not-null constraints
-- Uniqueness
-- Dimension relationships
-- Fact table grain
-- Referential integrity
+The source data contains several intentional quality challenges:
 
-The project currently passes all configured dbt tests.
+- 7 sales records have missing or invalid transaction dates.
+- 3 sales records have an UNKNOWN currency.
+- 1 sales transaction contains a negative quantity and is identified as a return.
+- 12 reviews have missing or invalid ratings after validation.
+- 4 finance target records have Region assigned as `NA` based on the source structure.
+- 8 sales records do not have EUR-converted revenue because a valid conversion could not be performed.
 
----
+These records are retained rather than artificially corrected or removed.
 
-## Documentation
+## Power BI
 
-The repository contains:
+The Gold layer is consumed by Power BI for business intelligence reporting.
 
-- `GOLD_ERD.md` — Gold layer entity relationship diagram
-- `DATA_QUALITY.md` — Data quality issues, treatments, assumptions and schema drift strategy
-- `models/schema.yml` — dbt model and column documentation
-- `models/sources.yml` — Bronze source definitions
-
----
-
-## BI Dashboard
-
-Power BI is connected exclusively to the Gold analytical model.
-
-The executive dashboard is designed to provide:
+The dashboard focuses on:
 
 ### Sales Performance
 
@@ -258,86 +256,115 @@ The executive dashboard is designed to provide:
 - Total Profit
 - Total Orders
 - Average Order Value
-- MTD vs Previous MTD
-- YTD vs Previous YTD
-- Daily / weekly sales trends
-- Moving Average
+- Monthly performance
+- Daily and weekly sales trends
+- Moving averages
+- MTD performance
+- YTD performance
+- Previous-period comparisons
+- Percentage variance
 
-### Target Performance
+### Target Tracking
 
 - Actual Revenue vs Target Revenue
 - Monthly target performance
-- Regional performance
+- Regional target analysis
 - Distance from target
 
-### Interactivity
+The Power BI model uses the Gold dimensions and fact tables rather than querying the raw source data directly.
 
-- Reporting date selection
-- Product Category filtering
-- Region filtering
-- Category → Product drill-down
+## Important Modelling Decisions
 
----
+### No Sales Region
 
-## Key Design Decisions
+The sales source does not contain regional information.
 
-### No artificial Region relationship
+Therefore, no sales region has been inferred or artificially created.
 
-Sales transactions do not contain a region attribute. Therefore, no artificial relationship between sales and target regions has been created.
+Regional information is only available in the finance target dataset.
 
-### Currency preservation
+### No Direct Sales-to-Target Relationship
 
-Sales contain multiple currencies. Since no FX source was provided, no currency conversion was performed. The original currency is preserved.
+`FCT_SALES` and `FCT_TARGETS` are intentionally not directly related.
 
-### Reviews remain in Silver
+The two datasets have different available dimensions and grains:
 
-Reviews are cleaned and retained in Silver but are not included in Gold because review metrics are not required by the specified executive dashboard.
+- Sales → Order level
+- Targets → Region + Category + Month
 
-### Missing dates are retained
+A future regional mapping would be required to perform regional actual-vs-target analysis at sales level.
 
-Sales records with missing or unresolved dates are retained with a `NULL` transaction date instead of being deleted.
+### Product Category and Targets
 
----
+Product category filters currently apply to sales through `DIM_PRODUCT`.
+
+There is no shared category dimension connecting `DIM_PRODUCT` to `FCT_TARGETS`.
+
+Therefore, category-based target comparisons require additional modelling if this functionality is expanded in the future.
+
+### Reviews
+
+Web reviews remain in the Silver layer because review metrics are outside the current Power BI reporting scope.
+
+## Technology Stack
+
+| Technology | Purpose |
+|---|---|
+| Dataiku | Data preparation and source ingestion |
+| Snowflake | Cloud data warehouse |
+| dbt | Data transformation, modelling, testing and documentation |
+| Power BI | Business intelligence and visualization |
+| GitHub | Version control and project documentation |
+| ECB Reference Rates | Currency standardization |
 
 ## Project Structure
 
 ```text
-nova-retail-hackaton-project/
+nova-retail/
 │
 ├── models/
+│   ├── staging/
+│   │   ├── stg_sales_transactions.sql
+│   │   ├── stg_web_reviews.sql
+│   │   ├── stg_finance_targets.sql
+│   │   └── stg_fx_ecb.sql
+│   │
 │   ├── core/
-│   │   ├── dim_customer.sql
 │   │   ├── dim_date.sql
+│   │   ├── dim_customer.sql
 │   │   ├── dim_product.sql
 │   │   ├── fct_sales.sql
 │   │   └── fct_targets.sql
 │   │
-│   ├── staging/
-│   │   ├── stg_sales_transactions.sql
-│   │   ├── stg_web_reviews.sql
-│   │   └── stg_finance_targets.sql
-│   │
-│   ├── schema.yml
-│   └── sources.yml
+│   └── schema.yml
+│
+├── tests/
+│   ├── fct_targets_unique_grain.sql
+│   ├── fct_targets_positive_amount.sql
+│   ├── stg_fx_ecb_unique_grain.sql
+│   └── fct_sales_fx_conversion.sql
 │
 ├── macros/
 │   └── generate_schema_name.sql
 │
-├── tests/
-│   └── fct_targets_unique_grain.sql
-│
-├── GOLD_ERD.md
-├── DATA_QUALITY.md
 ├── README.md
-└── dbt_project.yml
+├── DATA_QUALITY.md
+└── GOLD_ERD.md
 ```
 
----
+## Documentation
 
-## End-to-End Flow
+Additional documentation is available in:
 
-The complete pipeline is:
+- `GOLD_ERD.md` — Gold-layer data model and relationships
+- `DATA_QUALITY.md` — Data quality rules, tests, assumptions and limitations
 
-**Dataiku → Snowflake Bronze → dbt Silver → dbt Gold → Power BI**
+## Key Outcome
 
-This architecture separates raw ingestion, data transformation and business consumption while providing data quality testing, documentation and a clear analytical model.
+Nova Retail provides an end-to-end example of how raw multi-source data can be transformed into a governed analytical model using a modern data stack.
+
+The final architecture combines:
+
+**Data Preparation → Cloud Data Warehouse → dbt Transformation & Testing → Dimensional Modelling → Business Intelligence**
+
+The resulting Gold layer provides a structured foundation for Power BI reporting while keeping data-quality issues, modelling assumptions and technical limitations transparent.
