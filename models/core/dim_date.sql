@@ -21,8 +21,8 @@ select
     dayofweek(date_day) as day_of_week,
     dayname(date_day) as day_name,
     case
-        when dayofweek(date_day) in (1, 7) then false
-        else true
+       when dayofweek(date_day) in (0, 6) then false
+       else true
     end as is_weekday,
     date_trunc('month', date_day) as month_start,
     date_trunc('quarter', date_day) as quarter_start,

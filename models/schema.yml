@@ -1,0 +1,196 @@
+version: 2
+
+models:
+
+  # ============================================================
+  # DIM_DATE
+  # ============================================================
+
+  - name: dim_date
+    description: "Date dimension for calendar and time-based analysis."
+
+    columns:
+
+      - name: date_day
+        description: "Calendar date."
+        tests:
+          - not_null
+          - unique
+
+      - name: year
+        description: "Calendar year."
+
+      - name: month_number
+        description: "Numeric month number from 1 to 12."
+
+      - name: month_name
+        description: "Name of the calendar month."
+
+      - name: quarter
+        description: "Calendar quarter."
+
+      - name: week_number
+        description: "Calendar week number."
+
+      - name: day_of_month
+        description: "Day of the month."
+
+      - name: day_of_week
+        description: "Numeric day of the week."
+
+      - name: day_name
+        description: "Name of the day of the week."
+
+      - name: is_weekday
+        description: "Boolean flag indicating whether the date is a weekday."
+
+      - name: month_start
+        description: "First day of the corresponding month."
+
+      - name: quarter_start
+        description: "First day of the corresponding quarter."
+
+      - name: year_start
+        description: "First day of the corresponding year."
+
+
+  # ============================================================
+  # DIM_CUSTOMER
+  # ============================================================
+
+  - name: dim_customer
+    description: "Customer dimension containing unique customers."
+
+    columns:
+
+      - name: customer_key
+        description: "Surrogate key generated from the normalized customer email."
+        tests:
+          - not_null
+          - unique
+
+      - name: customer_email
+        description: "Normalized customer email address."
+
+      - name: customer_name
+        description: "Customer full name."
+
+      - name: customer_phone
+        description: "Customer phone number."
+
+
+  # ============================================================
+  # DIM_PRODUCT
+  # ============================================================
+
+  - name: dim_product
+    description: "Product dimension containing products and their categories."
+
+    columns:
+
+      - name: product_key
+        description: "Surrogate key generated from the product ID."
+        tests:
+          - not_null
+          - unique
+
+      - name: product_id
+        description: "Source product identifier."
+        tests:
+          - not_null
+          - unique
+
+      - name: product_category
+        description: "Product category used for category-level analysis and drill-down."
+
+
+  # ============================================================
+  # FCT_SALES
+  # ============================================================
+
+  - name: fct_sales
+    description: "Sales fact table at transaction level. The grain is one row per sales order."
+
+    columns:
+
+      - name: order_id
+        description: "Unique sales transaction identifier."
+        tests:
+          - not_null
+          - unique
+
+      - name: date_day
+        description: "Transaction date used to connect sales with the date dimension."
+
+      - name: customer_key
+        description: "Foreign key to the customer dimension."
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_key
+
+      - name: product_key
+        description: "Foreign key to the product dimension."
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_key
+
+      - name: product_id
+        description: "Source product identifier."
+
+      - name: product_category
+        description: "Product category associated with the transaction."
+
+      - name: qty
+        description: "Quantity recorded for the transaction. Negative quantities represent returns."
+
+      - name: price
+        description: "Unit price after removing currency symbols and formatting characters."
+
+      - name: price_currency
+        description: "Currency associated with the original transaction price."
+
+      - name: discount_pct
+        description: "Discount applied to the transaction, standardized as a decimal."
+
+      - name: is_returned
+        description: "Boolean flag indicating whether the transaction has a negative quantity."
+
+      - name: revenue
+        description: "Transaction revenue calculated as price multiplied by quantity and adjusted for discount."
+
+      - name: profit
+        description: "Transaction profit calculated using the 30% margin assumption specified for the project."
+
+
+  # ============================================================
+  # FCT_TARGETS
+  # ============================================================
+
+  - name: fct_targets
+    description: "Monthly revenue targets by region and product category. The grain is one row per region, category and month."
+
+    columns:
+
+      - name: region
+        description: "Sales region associated with the monthly target."
+        tests:
+          - not_null
+
+      - name: category
+        description: "Product category associated with the monthly target."
+        tests:
+          - not_null
+
+      - name: date_day
+        description: "First day of the target month."
+        tests:
+          - not_null
+
+      - name: target_amount
+        description: "Revenue target amount for the specified region, category and month."
+        tests:
+          - not_null
