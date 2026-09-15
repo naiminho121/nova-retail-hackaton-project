@@ -1,0 +1,13 @@
+version: 2
+
+sources:
+  - name: nova_bronze
+    database: NOVA_RETAIL
+    schema: BRONZE
+
+    tables:
+      - name: NOVARETAIL_RAW_SALES_TRANSACTIONS_COPY
+
+      - name: NOVARETAIL_WEB_REVIEWS_COPY
+
+      - name: NOVARETAIL_FINANCE_TARGETS_2023_COPY
