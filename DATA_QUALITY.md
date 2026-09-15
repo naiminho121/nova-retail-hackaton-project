@@ -1,115 +1,314 @@
-# Nova Retail — Data Quality & Transformation Log
+# Nova Retail — Data Quality
+
+This document describes the main data quality checks, cleaning rules and assumptions applied throughout the Nova Retail data pipeline.
 
 ## 1. Sales Transactions
 
-Source: `raw_sales_transactions.csv`
+### Source
 
-| Field | Data Quality Issue | Treatment |
-|---|---|---|
-| `transaction_date` | Mixed date formats, null values and the literal value `Today` were present. | Standardized valid values to `DATE`. `Today` and missing values are converted to `NULL`. |
-| `customer_info` | Customer name, email and phone were stored together in a single pipe-separated field. | Split into `customer_name`, `customer_email` and `customer_phone`. |
-| `price` | Values contained different currency symbols and formatting, including `$`, `€`, `£`, commas and spaces. | Currency symbols and formatting characters were removed and the value was converted to a numeric field. The original currency is preserved in `price_currency`. No FX conversion was applied because exchange rates were not provided. |
-| `qty` | A negative quantity was present. | Negative quantities are preserved and flagged through `is_returned = TRUE`. |
-| `discount_pct` | Mixed representations including decimals, percentages and `N/A` values. | Standardized to decimal format. Missing, empty and `N/A` values are treated as `0`. |
+`raw_sales_transactions.csv`
 
-### Sales validation
+### Volume
 
-- 100 source transactions were retained.
-- 100 distinct `order_id` values were identified.
-- 1 transaction contains a negative quantity and is flagged as a return.
-- 7 transactions have no usable transaction date because of missing values or the literal `Today`.
-- No transaction was removed solely because of a missing date.
-- All transactions have a valid numeric quantity.
-- All transactions have a valid numeric price after standardization.
+- 100 sales records
+- 100 unique orders
+
+### Main data quality issues
+
+#### Transaction dates
+
+The source contains multiple date formats and invalid or missing values, including:
+
+- ISO format
+- Different slash-based formats
+- Text values such as `Today`
+- Null values
+
+The staging model standardizes valid dates into the `DATE` data type.
+
+After cleaning, **7 records have a missing or invalid transaction date**.
+
+These records are retained in the dataset rather than removed.
+
+#### Customer information
+
+Customer information is originally stored in a single pipe-separated field:
+
+```text
+Name | Email | Phone
+```
+
+The staging layer splits this field into:
+
+- `customer_name`
+- `customer_email`
+- `customer_phone`
+
+Customer emails are normalized to lowercase and trimmed before being used to generate the customer key.
+
+#### Price and currency
+
+The source contains prices with different currency formats:
+
+- `$` → USD
+- `€` → EUR
+- `£` → GBP
+- Numeric values without a currency symbol → UNKNOWN
+
+The currency is stored separately in `price_currency`.
+
+The numeric price value is cleaned and converted into a decimal field.
+
+Three sales records have an `UNKNOWN` currency because the original source does not provide enough information to determine their currency.
+
+These records are retained.
+
+#### Quantity
+
+Quantity is converted into a numeric field.
+
+One transaction contains a negative quantity and is identified as a return through:
+
+```text
+is_returned
+```
+
+The original quantity is retained rather than removed or corrected.
+
+#### Discounts
+
+Discount values appear in different formats, including decimal values, percentages and missing/N/A values.
+
+They are standardized to decimal representation.
+
+Examples:
+
+```text
+10% → 0.10
+0.15 → 0.15
+N/A → 0
+```
 
 ---
 
 ## 2. Web Reviews
 
-Source: `web_reviews.json`
+### Source
 
-The nested JSON structure was flattened during ingestion to expose customer, product, timestamp and review attributes.
+`web_reviews.json`
 
-| Field | Data Quality Issue | Treatment |
-|---|---|---|
-| `timestamp` | Timestamps were provided using both seconds and milliseconds. | Timestamp precision is detected from the value and normalized to `TIMESTAMP`. |
-| `rating` | Missing and invalid rating values were present. | Only ratings between 1 and 5 are retained. Invalid or missing values are standardized to `NULL`. |
-| Customer information | Customer information was nested inside the JSON structure. | Relevant customer attributes were flattened into separate columns. |
+### Volume
 
-### Reviews validation
+- 60 review records
 
-- 60 reviews were processed.
-- 0 missing timestamps remain after normalization.
-- 12 reviews have a missing or invalid standardized rating.
-- No invalid rating outside the accepted 1–5 range remains as a populated value.
+### Timestamp
 
-Reviews are retained in the Silver layer because they are part of the available source data. They are not included in the Gold analytical model because the required executive dashboard does not contain review-related KPIs or visualizations.
+The source contains both:
+
+- 10-digit Unix timestamps
+- 13-digit Unix timestamps
+
+The staging model detects the timestamp format and converts both into a standard timestamp.
+
+### Ratings
+
+Ratings are expected to be between 1 and 5.
+
+Invalid or missing ratings are converted to NULL.
+
+After cleaning, **12 reviews have missing ratings**.
+
+The review records are retained.
 
 ---
 
 ## 3. Finance Targets
 
-Source: `finance_targets_2023.xlsx` / CSV representation
+### Source
 
-| Field / Structure | Data Quality Issue | Treatment |
-|---|---|---|
-| `Region` | The first block of source records contained missing region values. | Missing values were assigned `NA` based on the structure of the source data. This assumption is documented rather than silently discarded. |
-| Monthly target columns | Targets were stored in a wide format with one column per month. | Data was unpivoted into one row per Region, Category and Month. |
-| Target values | Target amounts required numeric standardization. | Values were converted to a numeric decimal representation. |
+`finance_targets_2023.xlsx`
 
-### Finance validation
+### Source structure
 
-The source contains:
+The original dataset is provided in a wide monthly format.
 
-- 16 Region/Category combinations.
-- 12 monthly target columns.
-- 192 rows after unpivoting.
+The staging model transforms it into a long format containing:
 
-The resulting Gold fact table has a defined grain of:
+- `region`
+- `category`
+- `month`
+- `target_amount`
 
-> **One row per Region + Category + Month.**
+### Grain
 
-A dedicated dbt test validates that this grain is unique.
+The target fact table has the following grain:
+
+**Region + Category + Month**
+
+The resulting dataset contains:
+
+**16 Region × Category combinations × 12 months = 192 records**
+
+### Missing Region
+
+The first four source rows contain missing Region values.
+
+These values were assigned `NA` based on the structure of the source dataset.
+
+This is documented as a project assumption rather than a confirmed source value.
+
+### Target currency
+
+The source does not explicitly specify the currency of `target_amount`.
+
+Therefore, the target currency should be treated as an assumption and should not be presented as a confirmed source attribute.
 
 ---
 
-## 4. Bronze → Silver → Gold Strategy
+## 4. Foreign Exchange Rates
 
-The project follows a Medallion-style architecture.
+### Source
+
+ECB historical reference exchange rates.
+
+The source data was filtered to the 2023 reporting period before being loaded into Snowflake Bronze.
+
+### Purpose
+
+The FX data is used to standardize USD and GBP sales into EUR so that global financial KPIs can be compared using a common currency.
+
+### Currencies used
+
+The project uses:
+
+- USD
+- GBP
+
+EUR transactions use an exchange rate of `1`.
+
+### Rate definition
+
+ECB rates represent the amount of the original currency corresponding to one EUR.
+
+Therefore:
+
+```text
+Revenue EUR = Revenue in Original Currency / ECB Rate
+```
+
+### FX date matching
+
+For USD and GBP transactions, the model uses the latest available ECB reference rate on or before the transaction date.
+
+This is implemented using:
+
+```text
+fx_rate_date
+fx_rate_to_eur
+```
+
+### Missing FX rates
+
+Some transactions cannot be converted to EUR because:
+
+- The transaction date is missing, or
+- No applicable ECB rate is available in the loaded 2023 dataset.
+
+In these cases:
+
+```text
+revenue_eur = NULL
+profit_eur = NULL
+```
+
+The original revenue and profit values are retained.
+
+No FX rate is estimated or imputed.
+
+### Current conversion coverage
+
+The resulting `FCT_SALES` table contains:
+
+- 100 total orders
+- 92 orders with EUR-converted revenue
+- 8 orders without EUR-converted revenue
+
+The missing conversions are intentional and traceable to the conditions described above.
+
+---
+
+## 5. dbt Data Quality Tests
+
+The project uses both generic and singular dbt tests.
+
+### Generic tests
+
+Generic tests provide systematic validation of key columns.
+
+Examples include:
+
+- `not_null`
+- `unique`
+- `relationships`
+- `accepted_values`
+
+### Singular tests
+
+Singular tests are used for project-specific business rules.
+
+Current singular tests include:
+
+#### `fct_targets_unique_grain`
+
+Checks that there are no duplicate combinations of:
+
+```text
+region + category + date_day
+```
+
+#### `fct_targets_positive_amount`
+
+Checks that target amounts are not negative.
+
+#### `stg_fx_ecb_unique_grain`
+
+Checks that there is only one FX rate for each:
+
+```text
+date_day + currency
+```
+
+#### `fct_sales_fx_conversion`
+
+Checks that a transaction with an available FX rate does not produce a NULL EUR revenue value.
+
+All current dbt models and tests pass successfully.
+
+---
+
+## 6. Data Modelling Decisions
 
 ### Bronze
 
-Bronze contains the raw data ingested from the original local files with minimal structural changes.
-
-Sources:
-
-- Sales transactions
-- Web reviews
-- Finance targets
-
-The objective of Bronze is to preserve the original source information and provide a controlled landing layer.
+Bronze contains raw or minimally prepared source data loaded from Dataiku into Snowflake.
 
 ### Silver
 
-Silver contains cleaned and standardized data.
+Silver contains cleaned and standardized source-level data.
 
-Main transformations include:
+Examples include:
 
-- Data type standardization
-- Date normalization
-- Customer information parsing
-- Currency and price cleaning
-- Discount standardization
-- Return identification
+- Date standardization
+- Customer field splitting
+- Currency identification
+- Discount normalization
 - Review timestamp normalization
-- Review rating validation
 - Finance target unpivoting
+- FX reshaping
 
 ### Gold
 
-Gold contains the business-ready dimensional model used for analytics and BI.
-
-The model consists of:
+Gold contains analytics-ready dimensional and fact models:
 
 - `DIM_DATE`
 - `DIM_CUSTOMER`
@@ -117,99 +316,35 @@ The model consists of:
 - `FCT_SALES`
 - `FCT_TARGETS`
 
-The Gold layer is designed specifically to support the required executive dashboard.
-
----
-
-## 5. Data Quality Testing
-
-dbt tests are used to validate the Gold layer.
-
-Current tests cover:
-
-- Not-null constraints
-- Uniqueness constraints
-- Foreign-key relationships
-- `FCT_TARGETS` grain uniqueness
-
-Key validations include:
-
-- `DIM_DATE.date_day` is unique and not null.
-- `DIM_CUSTOMER.customer_key` is unique and not null.
-- `DIM_PRODUCT.product_key` and `product_id` are unique and not null.
-- `FCT_SALES.order_id` is unique and not null.
-- Sales customer and product keys have valid relationships with their dimensions.
-- `FCT_TARGETS` contains no duplicate Region + Category + Month combinations.
-
-All configured dbt tests pass successfully.
-
----
-
-## 6. Schema Drift Strategy
-
-Schema drift is handled by separating raw ingestion from transformation logic.
-
-### Bronze
-
-New or changed source fields should first land in Bronze without being silently discarded.
-
-### Silver
-
-The staging models explicitly select and transform the fields required by the analytical model. Changes to source field names, formats or data types can therefore be identified and handled during the Silver transformation layer.
-
-### Gold
-
-Gold models expose only business-ready fields required for analytics and reporting. This prevents unexpected source changes from directly affecting the BI layer.
-
-If a source schema changes, the recommended process is:
-
-1. Identify the changed or new field in the Bronze layer.
-2. Assess its impact on the Silver transformation.
-3. Update the relevant dbt staging model.
-4. Update tests and documentation where required.
-5. Validate the Gold model.
-6. Re-run dbt tests before exposing the changes to Power BI.
-
----
-
-## 7. Assumptions & Limitations
-
-### Currency
-
-Sales contain multiple currencies (`USD`, `EUR`, `GBP` and unknown/bare numeric values).
-
-No exchange-rate source was provided, therefore no currency conversion was performed. The original currency is preserved in `price_currency`.
-
-Revenue and profit should therefore be interpreted within the currency context of each transaction unless an external FX source is introduced.
-
-### Profit
-
-Profit is calculated using the uniform **30% margin assumption specified in the project brief**:
-
-`Profit = Revenue × 30%`
-
-### Missing transaction dates
-
-Transactions with missing or unresolved dates are retained rather than deleted. Their `date_day` remains `NULL`.
-
-This preserves the original transaction records while preventing uncertain dates from being artificially assigned.
-
-### Region
-
-Sales transactions do not contain a region field. Region is therefore available only in the Finance Targets dataset.
-
-No artificial relationship between sales and target regions has been created.
-
 ### Reviews
 
-Reviews are cleaned and retained in Silver but are not included in the Gold model because they are not required by the specified executive dashboard.
+Web reviews remain in the Silver layer because they are not required for the current Power BI reporting scope.
+
+### Regional sales analysis
+
+The sales source does not contain region information.
+
+Therefore, no sales region has been inferred or artificially created.
+
+Regional information exists only in the target dataset.
+
+As a result, regional target comparisons require an appropriate regional mapping if they are to be extended to actual sales performance.
 
 ---
 
-## 8. Summary
+## 7. Known Limitations and Assumptions
 
-The data pipeline transforms three heterogeneous source datasets into a tested and documented analytical model:
+The following points should be considered when interpreting the Gold layer:
 
-**Local Files → Dataiku → Snowflake Bronze → dbt Silver → dbt Gold → Power BI**
+1. Seven sales records have missing or invalid transaction dates.
+2. Three sales records have an UNKNOWN currency.
+3. Eight sales records do not have EUR-converted revenue.
+4. Four finance target records have Region assigned as `NA` based on the source structure.
+5. The currency of finance targets is not explicitly specified by the source.
+6. ECB FX rates are limited to the loaded 2023 reference data.
+7. No sales region has been inferred because the sales source does not contain regional information.
+8. `FCT_TARGETS` has a monthly grain, while `FCT_SALES` has an order-level grain.
+9. There is no direct relationship between sales and targets by category or region in the current Gold model.
+10. EUR-converted measures should be used for cross-currency financial analysis where available.
 
-Data quality issues are handled explicitly rather than silently removing records, and the Gold layer is protected through dbt testing and documentation.
+These limitations are intentionally documented rather than hidden or corrected through unsupported assumptions.

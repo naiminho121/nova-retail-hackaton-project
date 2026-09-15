@@ -1,7 +1,31 @@
 version: 2
 
 models:
+  # ============================================================
+  # stg_fx_ecb
+  # ============================================================
 
+  - name: stg_fx_ecb
+    description: "ECB historical reference exchange rates used to standardize USD and GBP sales to EUR."
+
+    columns:
+      - name: date_day
+        description: "ECB reference rate date."
+        tests:
+          - not_null
+
+      - name: currency
+        description: "Original transaction currency."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['USD', 'GBP']
+
+      - name: rate_to_eur
+        description: "ECB reference exchange rate expressed as units of the original currency per EUR."
+        tests:
+          - not_null
   # ============================================================
   # DIM_DATE
   # ============================================================
@@ -151,7 +175,12 @@ models:
         description: "Unit price after removing currency symbols and formatting characters."
 
       - name: price_currency
-        description: "Currency associated with the original transaction price."
+        description: "Currency detected from the original price field."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['EUR', 'USD', 'GBP', 'UNKNOWN']
 
       - name: discount_pct
         description: "Discount applied to the transaction, standardized as a decimal."
@@ -164,6 +193,18 @@ models:
 
       - name: profit
         description: "Transaction profit calculated using the 30% margin assumption specified for the project."
+
+      - name: fx_rate_to_eur
+        description: "ECB reference exchange rate used to convert the original transaction currency to EUR."
+
+      - name: fx_rate_date
+        description: "Date of the ECB reference exchange rate used for the conversion."
+
+      - name: revenue_eur
+        description: "Revenue standardized to EUR using ECB reference exchange rates. NULL when the currency or exchange rate is unavailable."
+
+      - name: profit_eur
+        description: "Profit standardized to EUR using ECB reference exchange rates. NULL when the currency or exchange rate is unavailable."
 
 
   # ============================================================
